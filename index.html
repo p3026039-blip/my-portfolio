@@ -607,7 +607,7 @@ const I18N={
     backupSaved:'バックアップを保存しました', backupRestored:'バックアップから復元しました',
     backupInvalid:'このファイルは復元できませんでした（形式が違います）', backupConfirm:'バックアップから復元すると、現在のデータは上書きされます。続けますか？',
     apiTitle:'データAPI（価格取得）',
-    apiDesc:'銘柄の現在価格を取得するための、あなた専用の中継窓口（Cloudflare Workers等）のURLを入力してください。未設定の場合、価格は自動取得されず手動入力になります。',
+    apiDesc:'銘柄の検索・現在価格の取得に使う、あなた専用の中継窓口（Cloudflare Workers等）のURLを入力してください。未設定の場合、銘柄検索は内蔵リストのみ、価格は手動入力になります。',
     apiTest:'接続テスト', apiTestOk:'✅ 接続できました（トヨタ自動車 ¥', apiTestFail:'⚠️ 接続できませんでした。URLや中継窓口の設定を確認してください。',
     apiTestEmpty:'まずURLを入力してください。',
     noFav:'お気に入りなし', favHint:'一覧の☆でブックマーク',
@@ -639,7 +639,7 @@ const I18N={
     backupSaved:'Backup saved', backupRestored:'Restored from backup',
     backupInvalid:'This file could not be restored (invalid format)', backupConfirm:'Restoring from backup will overwrite your current data. Continue?',
     apiTitle:'Data API (price lookup)',
-    apiDesc:'Enter the URL of your own relay (e.g. a Cloudflare Worker) used to fetch current stock prices. If left empty, prices won\'t be fetched automatically and must be entered manually.',
+    apiDesc:'Enter the URL of your own relay (e.g. a Cloudflare Worker) used to search for stocks and fetch current prices. If left empty, search uses only the built-in list and prices must be entered manually.',
     apiTest:'Test Connection', apiTestOk:'✅ Connected (Toyota Motor ¥', apiTestFail:'⚠️ Could not connect. Please check the URL or your relay setup.',
     apiTestEmpty:'Please enter a URL first.',
     noFav:'No favorites yet', favHint:'Tap ☆ in the list to bookmark',
@@ -1054,16 +1054,40 @@ async function fetchPriceByTicker(ticker){
   }
 }
 
-function onSearch(q){
-  clearTimeout(stimer);
+let searchSeq=0;
+function renderSearchResults(results){
   const el=document.getElementById('sres');
-  if(!q.trim()){el.style.display='none';document.getElementById('add-inner').className='add-inner';return;}
-  // 銘柄名の特定は内蔵リストでオフライン・即時に行う（ネット検索には依存しない）
-  const results=searchLocal(q);
   el.innerHTML=results.length
     ?results.map(r=>`<div class="sitem" onclick='pickRemote(${JSON.stringify(r).replace(/'/g,"&apos;")})'><div class="sname">${r.name}</div><div class="ssub">${r.ticker} · ${(CATS[r.cat]&&CATS[r.cat].label)||r.cat}</div></div>`).join('')
     :`<div class="no-res">${t('noResult')}</div>`;
   el.style.display='block';
+}
+function mergeSearchResults(local,remote){
+  const seen=new Set(local.map(x=>x.ticker));
+  const extra=remote.filter(x=>x.ticker&&!seen.has(x.ticker));
+  return [...local,...extra].slice(0,15);
+}
+function onSearch(q){
+  clearTimeout(stimer);
+  const el=document.getElementById('sres');
+  if(!q.trim()){el.style.display='none';document.getElementById('add-inner').className='add-inner';return;}
+  // まず内蔵リストで即時表示（ネット不要・確実）
+  const localResults=searchLocal(q);
+  renderSearchResults(localResults);
+  if(!G.apiBase)return; // 中継窓口が未設定ならここまで（内蔵リストのみ）
+  // 続けて自分の中継窓口経由でYahoo Financeをライブ検索し、内蔵リストに無い銘柄も拾う
+  const mySeq=++searchSeq;
+  stimer=setTimeout(async()=>{
+    try{
+      const base=G.apiBase.replace(/\/+$/,'');
+      const res=await fetch(base+'?q='+encodeURIComponent(q),{signal:AbortSignal.timeout(7000)});
+      if(!res.ok)return;
+      const data=await res.json();
+      if(mySeq!==searchSeq)return; // 入力が変わっていたら結果を捨てる
+      const remote=(data&&data.results)||[];
+      if(remote.length)renderSearchResults(mergeSearchResults(localResults,remote));
+    }catch(e){/* ライブ検索が失敗しても内蔵リストの結果はそのまま残る */}
+  },400);
 }
 async function pickRemote(r){
   selDB=r;
