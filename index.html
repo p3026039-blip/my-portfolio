@@ -1062,31 +1062,34 @@ function renderSearchResults(results){
     :`<div class="no-res">${t('noResult')}</div>`;
   el.style.display='block';
 }
-function mergeSearchResults(local,remote){
-  const seen=new Set(local.map(x=>x.ticker));
-  const extra=remote.filter(x=>x.ticker&&!seen.has(x.ticker));
-  return [...local,...extra].slice(0,15);
-}
 function onSearch(q){
   clearTimeout(stimer);
   const el=document.getElementById('sres');
   if(!q.trim()){el.style.display='none';document.getElementById('add-inner').className='add-inner';return;}
-  // まず内蔵リストで即時表示（ネット不要・確実）
-  const localResults=searchLocal(q);
-  renderSearchResults(localResults);
-  if(!G.apiBase)return; // 中継窓口が未設定ならここまで（内蔵リストのみ）
-  // 続けて自分の中継窓口経由でYahoo Financeをライブ検索し、内蔵リストに無い銘柄も拾う
+  if(!G.apiBase){
+    // 中継窓口が未設定の場合のみ、内蔵リスト（オフライン）で即時表示
+    renderSearchResults(searchLocal(q));
+    return;
+  }
+  // 中継窓口が設定されている場合は、内蔵リストは使わずライブ検索のみを表示する
+  // （内蔵リストと混ざると「どっちが効いてるか」分からずデバッグできなくなるため）
+  el.innerHTML='<div class="no-res">'+(G.lang==='en'?'Searching live...':'ライブ検索中…')+'</div>';
+  el.style.display='block';
   const mySeq=++searchSeq;
   stimer=setTimeout(async()=>{
     try{
       const base=G.apiBase.replace(/\/+$/,'');
       const res=await fetch(base+'?q='+encodeURIComponent(q),{signal:AbortSignal.timeout(7000)});
-      if(!res.ok)return;
-      const data=await res.json();
       if(mySeq!==searchSeq)return; // 入力が変わっていたら結果を捨てる
+      if(!res.ok){el.innerHTML=`<div class="no-res">${t('searchError')}</div>`;return;}
+      const data=await res.json();
+      if(mySeq!==searchSeq)return;
       const remote=(data&&data.results)||[];
-      if(remote.length)renderSearchResults(mergeSearchResults(localResults,remote));
-    }catch(e){/* ライブ検索が失敗しても内蔵リストの結果はそのまま残る */}
+      renderSearchResults(remote);
+    }catch(e){
+      if(mySeq!==searchSeq)return;
+      el.innerHTML=`<div class="no-res">${t('searchError')}</div>`;
+    }
   },400);
 }
 async function pickRemote(r){
