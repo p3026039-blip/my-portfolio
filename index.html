@@ -658,6 +658,7 @@ const I18N={
     edit:'編集', del:'削除', save:'保存', cancel:'キャンセル',
     confirmDelete:'本当に削除しますか？', delConfirmBtn:'削除する', delCancelBtn:'やめる',
     noResult:'該当なし', searchError:'通信エラー：検索できませんでした。もう一度お試しください。', selectStock:'銘柄を検索・選択してください', enterQty:'数量を入力してください',
+    jpSearchHint:'内蔵リストに見つかりませんでした。日本語のライブ検索はYahoo側の仕様で対応していません。ローマ字・英語名・ティッカーコードで試してみてください（例: Toyota、TM、7203）。',
     enterName:'資産名を入力してください', enterAmount:'資産額を入力してください',
     yen:'円', dollar:'ドル',
   },
@@ -695,6 +696,7 @@ const I18N={
     edit:'Edit', del:'Delete', save:'Save', cancel:'Cancel',
     confirmDelete:'Are you sure you want to delete this?', delConfirmBtn:'Delete', delCancelBtn:'Cancel',
     noResult:'No results', searchError:'Network error — search failed. Please try again.', selectStock:'Please search and select a stock', enterQty:'Please enter a quantity',
+    jpSearchHint:'Not found in the built-in list. Live search for Japanese text isn\'t supported (Yahoo\'s API rejects non-Latin queries). Try romaji, the English name, or a ticker code (e.g. Toyota, TM, 7203).',
     enterName:'Please enter an asset name', enterAmount:'Please enter an asset value',
     yen:'JPY', dollar:'USD',
   }
@@ -1109,17 +1111,28 @@ function renderSearchResults(results){
     :`<div class="no-res">${t('noResult')}</div>`;
   el.style.display='block';
 }
+function isAsciiQuery(q){
+  // Yahoo Financeの検索APIは日本語(非ラテン文字)のクエリを仕様上拒否するため、
+  // ローマ字/英数字とそれ以外で経路を分ける
+  return /^[\x00-\x7F]*$/.test(q);
+}
 function onSearch(q){
   clearTimeout(stimer);
   const el=document.getElementById('sres');
   if(!q.trim()){el.style.display='none';document.getElementById('add-inner').className='add-inner';return;}
-  if(!G.apiBase){
-    // 中継窓口が未設定の場合のみ、内蔵リスト（オフライン）で即時表示
-    renderSearchResults(searchLocal(q));
+  if(!G.apiBase||!isAsciiQuery(q)){
+    // 中継窓口が未設定、または日本語クエリの場合は内蔵リスト（オフライン）で即時表示
+    // （Yahoo Finance検索APIは日本語クエリ自体を拒否するため、ここはライブ検索の対象外）
+    const local=searchLocal(q);
+    if(G.apiBase&&!isAsciiQuery(q)&&!local.length){
+      el.innerHTML=`<div class="no-res">${t('jpSearchHint')}</div>`;
+      el.style.display='block';
+      return;
+    }
+    renderSearchResults(local);
     return;
   }
-  // 中継窓口が設定されている場合は、内蔵リストは使わずライブ検索のみを表示する
-  // （内蔵リストと混ざると「どっちが効いてるか」分からずデバッグできなくなるため）
+  // 英数字クエリ・中継窓口設定済みの場合のみ、内蔵リストを使わずライブ検索を表示する
   el.innerHTML='<div class="no-res">'+(G.lang==='en'?'Searching live...':'ライブ検索中…')+'</div>';
   el.style.display='block';
   const mySeq=++searchSeq;
