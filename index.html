@@ -562,13 +562,6 @@ function searchLocal(q){
 
 
 const DEF=[
-{id:1,name:'トヨタ自動車',ticker:'7203.T',cat:'jp',qty:100,cost:2800,price:3200,prev:3150,fav:true,date:'2024-03-15',custom:false},
-{id:2,name:'Apple',ticker:'AAPL',cat:'us',qty:20,cost:180,price:213.49,prev:210.5,fav:false,date:'2024-01-10',custom:false},
-{id:3,name:'eMAXIS Slim 全世界株式',ticker:'0331418A',cat:'fund',qty:5000,cost:22000,price:25980,prev:25700,fav:false,date:'2023-06-01',custom:false},
-{id:4,name:'Bitcoin',ticker:'BTC-USD',cat:'crypto',qty:0.5,cost:85000,price:107000,prev:104000,fav:true,date:'2024-11-20',custom:false},
-{id:5,name:'日本円',ticker:'JPY',cat:'cash',qty:1500000,cost:1,price:1,prev:1,fav:false,date:'2023-01-01',custom:false},
-{id:6,name:'米ドル',ticker:'USD',cat:'cash',qty:3000,cost:140,price:144.5,prev:143.8,fav:false,date:'2024-08-05',custom:false},
-{id:7,name:'金（ゴールド）',ticker:'GOLD',cat:'gold',qty:10,cost:11000,price:12800,prev:12600,fav:false,date:'2024-05-10',custom:false},
 ];
 
 let G={cur:'JPY',lang:'ja',usdJpy:144.5,eurJpy:155.2,range:'1D',overviewCat:'ALL',assetRange:'1D',apiBase:'',assets:JSON.parse(JSON.stringify(DEF))};
@@ -585,7 +578,43 @@ let pendingDeleteId=null;
 let addMode='search';
 let histCache={};
 
-function persist(){try{localStorage.setItem('pf12',JSON.stringify(G));}catch(e){}}
+function persist(){
+  try{localStorage.setItem('pf12',JSON.stringify(G));}catch(e){}
+  syncToWorkerDebounced();
+}
+let syncTimer=null;
+function syncToWorkerDebounced(){
+  clearTimeout(syncTimer);
+  syncTimer=setTimeout(doSyncToWorker,1500);
+}
+async function doSyncToWorker(){
+  if(!G.apiBase)return;
+  if(!G.assets||!G.assets.length)return; // 空状態は送らない（消えた直後にリモートの正常なバックアップを上書きしてしまうのを防ぐ）
+  try{
+    const base=G.apiBase.replace(/\/+$/,'');
+    await fetch(base,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(G),
+      signal:AbortSignal.timeout(8000),
+    });
+  }catch(e){/* 失敗しても次回の変更時に再送される */}
+}
+async function tryRestoreFromWorker(){
+  if(!G.apiBase)return;
+  if(G.assets&&G.assets.length)return; // ローカルに既にデータがある場合は何もしない（新しい方を消さないため）
+  try{
+    const base=G.apiBase.replace(/\/+$/,'');
+    const res=await fetch(base+'?action=load',{signal:AbortSignal.timeout(8000)});
+    if(!res.ok)return;
+    const json=await res.json();
+    const remote=json&&json.data;
+    if(remote&&Array.isArray(remote.assets)&&remote.assets.length){
+      G={...G,...remote};
+      try{localStorage.setItem('pf12',JSON.stringify(G));}catch(e){}
+    }
+  }catch(e){/* 失敗時は今のローカル状態のまま続行 */}
+}
 
 const I18N={
   ja:{
@@ -1292,12 +1321,17 @@ function renderAll(){
 function getG(){ return G; }
 function getAddMode(){ return addMode; }
 
-document.getElementById('tgl-jpy').className='tgl'+(G.cur==='JPY'?' on':'');
-document.getElementById('tgl-usd').className='tgl'+(G.cur==='USD'?' on':'');
-document.getElementById('tgl-lang-ja').className='tgl'+(G.lang==='ja'?' on':'');
-document.getElementById('tgl-lang-en').className='tgl'+(G.lang==='en'?' on':'');
-applyStaticText();
-renderAll();
+(async function init(){
+  await tryRestoreFromWorker();
+  document.getElementById('tgl-jpy').className='tgl'+(G.cur==='JPY'?' on':'');
+  document.getElementById('tgl-usd').className='tgl'+(G.cur==='USD'?' on':'');
+  document.getElementById('tgl-lang-ja').className='tgl'+(G.lang==='ja'?' on':'');
+  document.getElementById('tgl-lang-en').className='tgl'+(G.lang==='en'?' on':'');
+  applyStaticText();
+  renderAll();
+  // サイトを開いた時にも自動で価格更新を試みる（中継窓口が未設定の場合は何もせず無視される）
+  if(G.assets.some(a=>!a.custom))doRefresh();
+})();
 </script>
 </body>
 </html>
