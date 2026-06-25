@@ -345,15 +345,22 @@ html,body{height:100%;background:#08090d;overscroll-behavior:none}
     <div class="setting-card">
       <h3 id="static-backup-title">データのバックアップ</h3>
       <p class="ssub2" id="static-backup-desc" style="margin:4px 0 14px;line-height:1.6">
-        このアプリはブラウザ内（端末上）にデータを保存しています。Safariの「ホーム画面に追加」で運用している場合、7日間アプリを開かないとブラウザの仕様でデータが消えてしまうことがあります。
-        消えてしまった場合に備えて、定期的にバックアップを保存しておくことをおすすめします。バックアップを保存しておけば、データが消えても下の「バックアップから復元」ボタンでお使いの端末に保存したバックアップファイルから復元できます。
+        資産を追加・編集すると、自動で「データAPI」の中継窓口にもバックアップが保存されます（操作不要）。端末側のデータが何らかの理由で消えてしまった場合、次にアプリを開いた時にこの自動バックアップから復元されます。機種変更などで手動で復元したい場合は、下のボタンからバックアップファイルを選んで復元できます。
       </p>
-      <div class="srow" style="gap:10px">
-        <button class="tgl" style="flex:1" onclick="doBackupExport()" id="static-backup-export">バックアップを保存</button>
+      <div class="srow" style="gap:10px;border-bottom:none;padding-bottom:0">
         <button class="tgl" style="flex:1" onclick="document.getElementById('backup-file-input').click()" id="static-backup-import">バックアップから復元</button>
         <input type="file" id="backup-file-input" accept="application/json" style="display:none" onchange="doBackupImport(event)">
       </div>
       <div id="backup-status" class="ssub2" style="margin-top:10px"></div>
+    </div>
+    <div class="setting-card">
+      <h3 id="static-clear-title">データの初期化</h3>
+      <p class="ssub2" id="static-clear-desc" style="margin:4px 0 14px;line-height:1.6">
+        テスト用に登録した資産を消して、まっさらな状態からやり直したい場合はこちら。元には戻せません（自動バックアップも一緒に消えます）。
+      </p>
+      <div class="srow" style="border-bottom:none;padding-bottom:0">
+        <button class="tgl" style="flex:1;color:var(--rd);border-color:var(--rd)" onclick="doClearAll()" id="static-clear-btn">すべての資産データを削除する</button>
+      </div>
     </div>
   </div>
 </div>
@@ -635,6 +642,11 @@ const I18N={
     backupExport:'バックアップを保存', backupImport:'バックアップから復元',
     backupSaved:'バックアップを保存しました', backupRestored:'バックアップから復元しました',
     backupInvalid:'このファイルは復元できませんでした（形式が違います）', backupConfirm:'バックアップから復元すると、現在のデータは上書きされます。続けますか？',
+    clearTitle:'データの初期化',
+    clearDesc:'テスト用に登録した資産を消して、まっさらな状態からやり直したい場合はこちら。元には戻せません（自動バックアップも一緒に消えます）。',
+    clearBtn:'すべての資産データを削除する',
+    clearConfirm:'本当にすべての資産データを削除しますか？この操作は元に戻せません。',
+    clearDone:'削除しました',
     apiTitle:'データAPI（価格取得）',
     apiDesc:'銘柄の検索・現在価格の取得に使う、あなた専用の中継窓口（Cloudflare Workers等）のURLを入力してください。未設定の場合、銘柄検索は内蔵リストのみ、価格は手動入力になります。',
     apiTest:'接続テスト', apiTestOk:'✅ 接続できました（トヨタ自動車 ¥', apiTestFail:'⚠️ 接続できませんでした。URLや中継窓口の設定を確認してください。',
@@ -667,6 +679,11 @@ const I18N={
     backupExport:'Save Backup', backupImport:'Restore from Backup',
     backupSaved:'Backup saved', backupRestored:'Restored from backup',
     backupInvalid:'This file could not be restored (invalid format)', backupConfirm:'Restoring from backup will overwrite your current data. Continue?',
+    clearTitle:'Reset Data',
+    clearDesc:'Use this to remove test assets and start completely fresh. This cannot be undone (the auto-backup is cleared too).',
+    clearBtn:'Delete all asset data',
+    clearConfirm:'Are you sure you want to delete all asset data? This cannot be undone.',
+    clearDone:'Deleted',
     apiTitle:'Data API (price lookup)',
     apiDesc:'Enter the URL of your own relay (e.g. a Cloudflare Worker) used to search for stocks and fetch current prices. If left empty, search uses only the built-in list and prices must be entered manually.',
     apiTest:'Test Connection', apiTestOk:'✅ Connected (Toyota Motor ¥', apiTestFail:'⚠️ Could not connect. Please check the URL or your relay setup.',
@@ -743,7 +760,8 @@ function applyStaticText(){
     'static-settings-display':'settingsDisplay','static-currency':'currency','static-currency-sub':'currencySub',
     'static-language':'language','static-language-sub':'languageSub',
     'static-backup-title':'backupTitle','static-backup-desc':'backupDesc',
-    'static-backup-export':'backupExport','static-backup-import':'backupImport',
+    'static-backup-import':'backupImport',
+    'static-clear-title':'clearTitle','static-clear-desc':'clearDesc','static-clear-btn':'clearBtn',
     'static-api-title':'apiTitle','static-api-desc':'apiDesc','static-api-test':'apiTest',
   };
   Object.keys(map).forEach(id=>{
@@ -1235,22 +1253,20 @@ async function doRefresh(){
 
 const TAB_NAMES=['overview','portfolio','assets','favorites','add','settings'];
 let currentTab='overview',tabBeforeSettings='overview';
-function doBackupExport(){
-  try{
-    const payload={app:'portfolio-backup',version:1,exportedAt:new Date().toISOString(),data:G};
-    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    const ymd=new Date().toISOString().slice(0,10);
-    a.href=url;a.download='portfolio-backup-'+ymd+'.json';
-    document.body.appendChild(a);a.click();document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    const st=document.getElementById('backup-status');
-    if(st){st.textContent='✅ '+t('backupSaved');st.style.color='#39ff8f';}
-  }catch(e){
-    const st=document.getElementById('backup-status');
-    if(st){st.textContent=(G.lang==='en'?'Failed to save backup.':'バックアップの保存に失敗しました。');st.style.color='#ff4d9d';}
+function doClearAll(){
+  if(!confirm(t('clearConfirm')))return;
+  G.assets=[];
+  try{localStorage.setItem('pf12',JSON.stringify(G));}catch(e){}
+  // 自動バックアップ(Worker側KV)も一緒に消す（空状態は通常送らないため、削除専用に明示送信）
+  if(G.apiBase){
+    try{
+      const base=G.apiBase.replace(/\/+$/,'');
+      fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(G)}).catch(()=>{});
+    }catch(e){}
   }
+  pfRendered=false;clearHistCache();renderAll();
+  const st=document.getElementById('backup-status');
+  if(st){st.textContent='✅ '+t('clearDone');st.style.color='#39ff8f';}
 }
 function doBackupImport(ev){
   const file=ev.target.files&&ev.target.files[0];
