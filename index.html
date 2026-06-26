@@ -808,7 +808,7 @@ function setAssetRange(r){
   renderAssets();
 }
 
-function genHistory(total,range){
+function genHistory(assets,total,range){
   const cacheKey=range+'_'+G.overviewCat+'_'+Math.round(total/1000);
   if(histCache[cacheKey]){
     const c=histCache[cacheKey].map(p=>({x:p.x,y:p.y}));
@@ -817,25 +817,23 @@ function genHistory(total,range){
   }
   const now=Date.now();
   const cfg={
-    '1D':{n:24,ms:3600000,v:0.005},
-    '1W':{n:7,ms:86400000,v:0.014},
-    '1M':{n:30,ms:86400000,v:0.028},
-    'YTD':{n:Math.max(new Date().getMonth()*4,4),ms:86400000*7,v:0.05},
-    '1Y':{n:52,ms:86400000*7,v:0.09},
-    'ALL':{n:36,ms:86400000*30,v:0.18},
-  }[range]||{n:24,ms:3600000,v:0.005};
+    '1D':{n:24,ms:3600000},
+    '1W':{n:7,ms:86400000},
+    '1M':{n:30,ms:86400000},
+    'YTD':{n:Math.max(new Date().getMonth()*4,4),ms:86400000*7},
+    '1Y':{n:52,ms:86400000*7},
+    'ALL':{n:36,ms:86400000*30},
+  }[range]||{n:24,ms:3600000};
+  // 各時点で「その時点までに購入済みの資産だけ」を現在の評価額で合算する
+  // （購入日より前は0、購入日でその資産分だけ段差状に増える。価格そのものの過去変動は反映しない簡易表示）
   const pts=[];
-  if(total<=0){
-    for(let i=cfg.n;i>=0;i--){
-      pts.push({x:new Date(now-i*cfg.ms),y:0});
-    }
-    histCache[cacheKey]=pts;
-    return pts;
-  }
-  let v=total*(1-cfg.v*0.7);
   for(let i=cfg.n;i>=0;i--){
-    v=Math.max(v*(1+(Math.random()-.44)*cfg.v/(cfg.n*.4)),0);
-    pts.push({x:new Date(now-i*cfg.ms),y:Math.round(v)});
+    const t=now-i*cfg.ms;
+    const v=assets.reduce((s,a)=>{
+      const acquired=a.date?new Date(a.date).getTime():-Infinity; // 日付未設定は「ずっと前から保有」扱い
+      return acquired<=t?s+toJpy(a):s;
+    },0);
+    pts.push({x:new Date(t),y:Math.round(v)});
   }
   pts[pts.length-1]={x:new Date(now),y:Math.round(total)};
   histCache[cacheKey]=pts;
@@ -853,7 +851,7 @@ function renderOverview(){
   const assets=filteredAssets();
   const total=assets.reduce((s,a)=>s+toJpy(a),0);
   document.getElementById('ov-total').textContent=fmt(total);
-  const pts=genHistory(total,G.range);
+  const pts=genHistory(assets,total,G.range);
   const first=pts[0].y,last=pts[pts.length-1].y;
   const diff=last-first,pct=first!==0?(diff/first*100):0;
   const gainEl=document.getElementById('ov-gain');
