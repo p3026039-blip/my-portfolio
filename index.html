@@ -571,7 +571,7 @@ function searchLocal(q){
 const DEF=[
 ];
 
-let G={cur:'JPY',lang:'ja',usdJpy:144.5,eurJpy:155.2,range:'1D',overviewCat:'ALL',assetRange:'1D',apiBase:'',assets:JSON.parse(JSON.stringify(DEF))};
+let G={cur:'JPY',lang:'ja',usdJpy:144.5,eurJpy:155.2,range:'1D',overviewCat:'ALL',assetRange:'1D',apiBase:'https://portfolio-price-relay.p3026039.workers.dev/',assets:JSON.parse(JSON.stringify(DEF))};
 try{
   const s=localStorage.getItem('pf12');
   if(s){
@@ -1361,6 +1361,18 @@ function getAddMode(){ return addMode; }
   // サイトを開いた時にも自動で価格更新を試みる（中継窓口が未設定の場合は何もせず無視される）
   if(G.assets.some(a=>!a.custom))doRefresh();
 })();
+
+// スワイプでホーム画面に戻して隠れていたページが再び表に出てきた時にも、
+// （フル起動かどうかに関係なく）確実に価格更新をかける。
+// 短時間に連続発火しないよう、最後の更新から一定時間あけてから走らせる。
+let lastVisRefresh=Date.now();
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState!=='visible')return;
+  const now=Date.now();
+  if(now-lastVisRefresh<15000)return; // 15秒以内の連続発火は無視（フル起動直後の重複防止）
+  lastVisRefresh=now;
+  if(G.assets.some(a=>!a.custom))doRefresh();
+});
 </script>
 </body>
 </html>
