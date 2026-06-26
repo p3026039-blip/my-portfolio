@@ -726,13 +726,17 @@ function pctStr(a){
   return (p>=0?'+':'')+p.toFixed(2)+'%';
 }
 
-const RANGE_VOLA={'1D':0.005,'1W':0.014,'1M':0.028,'YTD':0.05,'1Y':0.09,'ALL':0.18};
 function rangeGainPct(a,range){
-  if(a.custom)return 0;
-  let h=0;for(const c of a.ticker)h=(h*31+c.charCodeAt(0))&0xffff;
-  const seed=(h%100)/100;
-  const v=RANGE_VOLA[range]||0.005;
-  return (seed-.35)*v*2*100;
+  if(a.custom)return null;
+  if(range==='ALL'){
+    // 全期間=保有してからの損益として、取得単価があればそちらを優先
+    if(a.cost&&a.price!=null)return ((a.price-a.cost)/a.cost)*100;
+    return (a.changes&&typeof a.changes.y1==='number')?a.changes.y1:null;
+  }
+  const key={'1D':'d1','1W':'w1','1M':'m1','YTD':'ytd','1Y':'y1'}[range];
+  if(!key||!a.changes)return null;
+  const v=a.changes[key];
+  return (typeof v==='number')?v:null;
 }
 
 function setCur(c){
@@ -974,8 +978,8 @@ function aCardHTML(a,ctx){
   const isPendingDelete=pendingDeleteId===cardId;
   const gn=a.cost?(val-a.qty*a.cost):null;
   const rgPct=rangeGainPct(a,G.assetRange);
-  const rgStr=(rgPct>=0?'+':'')+rgPct.toFixed(2)+'%';
-  const rgCls=rgPct>=0?'pos':'neg';
+  const rgStr=(rgPct==null)?t('noData'):((rgPct>=0?'+':'')+rgPct.toFixed(2)+'%');
+  const rgCls=(rgPct==null)?'':(rgPct>=0?'pos':'neg');
   return`<div class="acard">
     <div class="acard-main" onclick="toggleCard('${cardId}')">
       <div class="arow1">
@@ -997,6 +1001,9 @@ function aCardHTML(a,ctx){
         <div class="eg">
           <div><span class="flbl" style="margin-top:0">${a.custom?t('customAmount'):t('qty')}</span><input class="finput" style="margin-bottom:0" type="number" id="eq-${cardId}" value="${a.custom?a.price:a.qty}" step="any"></div>
           ${a.custom?'':`<div><span class="flbl" style="margin-top:0">${t('acqPrice')}</span><input class="finput" style="margin-bottom:0" type="number" id="ec-${cardId}" value="${a.cost||''}"></div>`}
+        </div>
+        <div class="eg" style="margin-top:6px">
+          <div><span class="flbl" style="margin-top:0">${t('purchaseDateLbl')}</span><input class="finput" style="margin-bottom:0" type="date" id="ed-${cardId}" value="${a.date||''}"></div>
         </div>
         <div class="dbtns" style="margin-top:6px">
           <button class="btn-save" onclick="saveEdit('${cardId}',${a.id},${a.custom})">${t('save')}</button>
@@ -1033,6 +1040,8 @@ function saveEdit(cardId,id,isCustom){
   const a=G.assets.find(x=>x.id===id);if(!a)return;
   const qEl=document.getElementById('eq-'+cardId);
   const q=parseFloat(qEl.value);
+  const dEl=document.getElementById('ed-'+cardId);
+  if(dEl&&dEl.value)a.date=dEl.value;
   if(isCustom){
     if(!isNaN(q)&&q>0)a.price=q;
   }else{
@@ -1100,6 +1109,25 @@ async function fetchPriceByTicker(ticker){
     return (data&&typeof data.price==='number')?data.price:null;
   }catch(e){
     return null;
+  }
+}
+// 価格と一緒に、期間別(前日/週/月/年初来/1年)の実際の変動率もまとめて取得する
+async function fetchQuoteByTicker(ticker){
+  if(ticker==='JPY')return {price:1,changes:null};
+  const sym=tickerToQuerySymbol(ticker);
+  if(!sym)return {price:null,changes:null};
+  if(!G.apiBase)return {price:null,changes:null};
+  try{
+    const base=G.apiBase.replace(/\/+$/,'');
+    const res=await fetch(base+'?symbol='+encodeURIComponent(sym),{signal:AbortSignal.timeout(8000)});
+    if(!res.ok)return {price:null,changes:null};
+    const data=await res.json();
+    return {
+      price:(data&&typeof data.price==='number')?data.price:null,
+      changes:(data&&data.changes)?data.changes:null,
+    };
+  }catch(e){
+    return {price:null,changes:null};
   }
 }
 
@@ -1170,11 +1198,11 @@ async function pickRemote(r){
     return;
   }
   phint.textContent=(G.lang==='en'?'Fetching current price...':'現在価格を取得中...');
-  const price=await fetchPriceByTicker(r.ticker);
+  const q=await fetchQuoteByTicker(r.ticker);
   if(selDB!==r)return; // 別の銘柄に切り替えられていたら反映しない
-  if(price!=null){
-    selDB={...r,price};
-    phint.textContent='現在価格: ¥'+Number(price).toLocaleString()+' ('+r.ticker+')';
+  if(q.price!=null){
+    selDB={...r,price:q.price,changes:q.changes};
+    phint.textContent='現在価格: ¥'+Number(q.price).toLocaleString()+' ('+r.ticker+')';
   }else{
     phint.textContent=(G.lang==='en'?'Price unavailable — please enter cost basis manually.':'価格情報が取得できませんでした。取得単価を手動で入力してください。');
   }
@@ -1193,7 +1221,7 @@ function doAddAsset(){
   const effectivePrice=(selDB.price!=null)?selDB.price:(cv||0);
   G.assets.push({id:Date.now(),name:selDB.name,ticker:selDB.ticker,
     cat:document.getElementById('new-cat').value,
-    qty:qv,cost:cv,price:effectivePrice,prev:effectivePrice,fav:addFavFlag,date:dv,custom:false});
+    qty:qv,cost:cv,price:effectivePrice,prev:effectivePrice,changes:selDB.changes||null,fav:addFavFlag,date:dv,custom:false});
   persist();
   document.getElementById('sinp').value='';
   document.getElementById('new-qty').value='';
@@ -1241,15 +1269,17 @@ async function doRefresh(){
   tab.classList.add('spinning');tab.style.pointerEvents='none';
   // custom資産以外のtickerをユニーク化して、登録銘柄ごとに1回だけネット検索する（効率化）
   const tickers=[...new Set(G.assets.filter(a=>!a.custom).map(a=>a.ticker))];
-  const priceMap={};
+  const quoteMap={};
   for(const tk of tickers){
-    priceMap[tk]=await fetchPriceByTicker(tk);
+    quoteMap[tk]=await fetchQuoteByTicker(tk);
   }
   G.assets.forEach(a=>{
     if(a.custom)return;
-    const p=priceMap[a.ticker];
-    if(p!=null){a.prev=a.price;a.price=p;}
-    // 取得失敗時は直前の価格を保持（無理にランダム変動はさせない）
+    const q=quoteMap[a.ticker];
+    if(!q)return;
+    if(q.price!=null){a.prev=a.price;a.price=q.price;}
+    if(q.changes)a.changes=q.changes;
+    // 取得失敗時は直前の価格・変動率を保持（無理にランダム変動はさせない）
   });
   const usd=await fetchPriceByTicker('USD');
   const eur=await fetchPriceByTicker('EUR');
