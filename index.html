@@ -808,6 +808,24 @@ function setAssetRange(r){
   renderAssets();
 }
 
+// asset(資産)の指定時点tにおける評価額(JPY)を、保有してる価格履歴(series)から算出する。
+// seriesが無い(現金・カスタム資産・履行取得前など)場合は現在価格を遡って当てはめる簡易扱い。
+function valueAtTime(a,t){
+  const q=a.qty||0;
+  let p=a.price||0;
+  if(Array.isArray(a.series)&&a.series.length){
+    // series は [timestampMs, close] の配列（古い→新しい順）。t以前で最も新しい終値を探す
+    let found=null;
+    for(const pt of a.series){
+      if(pt[0]<=t)found=pt[1];
+      else break;
+    }
+    p=(found!=null)?found:a.series[0][1];
+  }
+  if(a.ticker==='EUR')return q*p*G.eurJpy;
+  if(a.cat==='us'||(a.ticker&&a.ticker.endsWith('-USD'))||a.ticker==='USD')return q*p*G.usdJpy;
+  return q*p;
+}
 function genHistory(assets,total,range){
   const cacheKey=range+'_'+G.overviewCat+'_'+Math.round(total/1000);
   if(histCache[cacheKey]){
@@ -824,14 +842,13 @@ function genHistory(assets,total,range){
     '1Y':{n:52,ms:86400000*7},
     'ALL':{n:36,ms:86400000*30},
   }[range]||{n:24,ms:3600000};
-  // 各時点で「その時点までに購入済みの資産だけ」を現在の評価額で合算する
-  // （購入日より前は0、購入日でその資産分だけ段差状に増える。価格そのものの過去変動は反映しない簡易表示）
+  // 各時点で「その時点までに購入済みの資産だけ」を、その時点の価格(履歴があれば実価格)で合算する
   const pts=[];
   for(let i=cfg.n;i>=0;i--){
     const t=now-i*cfg.ms;
     const v=assets.reduce((s,a)=>{
       const acquired=a.date?new Date(a.date).getTime():-Infinity; // 日付未設定は「ずっと前から保有」扱い
-      return acquired<=t?s+toJpy(a):s;
+      return acquired<=t?s+valueAtTime(a,t):s;
     },0);
     pts.push({x:new Date(t),y:Math.round(v)});
   }
@@ -1111,21 +1128,22 @@ async function fetchPriceByTicker(ticker){
 }
 // 価格と一緒に、期間別(前日/週/月/年初来/1年)の実際の変動率もまとめて取得する
 async function fetchQuoteByTicker(ticker){
-  if(ticker==='JPY')return {price:1,changes:null};
+  if(ticker==='JPY')return {price:1,changes:null,series:null};
   const sym=tickerToQuerySymbol(ticker);
-  if(!sym)return {price:null,changes:null};
-  if(!G.apiBase)return {price:null,changes:null};
+  if(!sym)return {price:null,changes:null,series:null};
+  if(!G.apiBase)return {price:null,changes:null,series:null};
   try{
     const base=G.apiBase.replace(/\/+$/,'');
     const res=await fetch(base+'?symbol='+encodeURIComponent(sym),{signal:AbortSignal.timeout(8000)});
-    if(!res.ok)return {price:null,changes:null};
+    if(!res.ok)return {price:null,changes:null,series:null};
     const data=await res.json();
     return {
       price:(data&&typeof data.price==='number')?data.price:null,
       changes:(data&&data.changes)?data.changes:null,
+      series:(data&&Array.isArray(data.series))?data.series:null,
     };
   }catch(e){
-    return {price:null,changes:null};
+    return {price:null,changes:null,series:null};
   }
 }
 
@@ -1199,7 +1217,7 @@ async function pickRemote(r){
   const q=await fetchQuoteByTicker(r.ticker);
   if(selDB!==r)return; // 別の銘柄に切り替えられていたら反映しない
   if(q.price!=null){
-    selDB={...r,price:q.price,changes:q.changes};
+    selDB={...r,price:q.price,changes:q.changes,series:q.series};
     phint.textContent='現在価格: ¥'+Number(q.price).toLocaleString()+' ('+r.ticker+')';
   }else{
     phint.textContent=(G.lang==='en'?'Price unavailable — please enter cost basis manually.':'価格情報が取得できませんでした。取得単価を手動で入力してください。');
@@ -1219,7 +1237,7 @@ function doAddAsset(){
   const effectivePrice=(selDB.price!=null)?selDB.price:(cv||0);
   G.assets.push({id:Date.now(),name:selDB.name,ticker:selDB.ticker,
     cat:document.getElementById('new-cat').value,
-    qty:qv,cost:cv,price:effectivePrice,prev:effectivePrice,changes:selDB.changes||null,fav:addFavFlag,date:dv,custom:false});
+    qty:qv,cost:cv,price:effectivePrice,prev:effectivePrice,changes:selDB.changes||null,series:selDB.series||null,fav:addFavFlag,date:dv,custom:false});
   persist();
   document.getElementById('sinp').value='';
   document.getElementById('new-qty').value='';
@@ -1277,7 +1295,8 @@ async function doRefresh(){
     if(!q)return;
     if(q.price!=null){a.prev=a.price;a.price=q.price;}
     if(q.changes)a.changes=q.changes;
-    // 取得失敗時は直前の価格・変動率を保持（無理にランダム変動はさせない）
+    if(q.series)a.series=q.series;
+    // 取得失敗時は直前の価格・変動率・履歴を保持（無理にランダム変動はさせない）
   });
   const usd=await fetchPriceByTicker('USD');
   const eur=await fetchPriceByTicker('EUR');
