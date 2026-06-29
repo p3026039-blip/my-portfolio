@@ -612,7 +612,7 @@ async function tryRestoreFromWorker(){
   if(G.assets&&G.assets.length)return; // ローカルに既にデータがある場合は何もしない（新しい方を消さないため）
   try{
     const base=G.apiBase.replace(/\/+$/,'');
-    const res=await fetch(base+'?action=load',{signal:AbortSignal.timeout(8000)});
+    const res=await fetch(base+'?action=load',{signal:AbortSignal.timeout(8000),cache:'no-store'});
     if(!res.ok)return;
     const json=await res.json();
     const remote=json&&json.data;
@@ -1118,7 +1118,7 @@ async function fetchPriceByTicker(ticker){
   if(!G.apiBase)return null;
   try{
     const base=G.apiBase.replace(/\/+$/,'');
-    const res=await fetch(base+'?symbol='+encodeURIComponent(sym),{signal:AbortSignal.timeout(8000)});
+    const res=await fetch(base+'?symbol='+encodeURIComponent(sym),{signal:AbortSignal.timeout(8000),cache:'no-store'});
     if(!res.ok)return null;
     const data=await res.json();
     return (data&&typeof data.price==='number')?data.price:null;
@@ -1134,7 +1134,7 @@ async function fetchQuoteByTicker(ticker){
   if(!G.apiBase)return {price:null,changes:null,series:null};
   try{
     const base=G.apiBase.replace(/\/+$/,'');
-    const res=await fetch(base+'?symbol='+encodeURIComponent(sym),{signal:AbortSignal.timeout(8000)});
+    const res=await fetch(base+'?symbol='+encodeURIComponent(sym),{signal:AbortSignal.timeout(8000),cache:'no-store'});
     if(!res.ok)return {price:null,changes:null,series:null};
     const data=await res.json();
     return {
@@ -1183,7 +1183,7 @@ function onSearch(q){
   stimer=setTimeout(async()=>{
     try{
       const base=G.apiBase.replace(/\/+$/,'');
-      const res=await fetch(base+'?q='+encodeURIComponent(q),{signal:AbortSignal.timeout(7000)});
+      const res=await fetch(base+'?q='+encodeURIComponent(q),{signal:AbortSignal.timeout(7000),cache:'no-store'});
       if(mySeq!==searchSeq)return; // 入力が変わっていたら結果を捨てる
       if(!res.ok){el.innerHTML=`<div class="no-res">${t('searchError')}</div>`;return;}
       const data=await res.json();
