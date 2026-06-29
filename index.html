@@ -1298,6 +1298,10 @@ async function doRefresh(){
     if(q.series)a.series=q.series;
     // 取得失敗時は直前の価格・変動率・履歴を保持（無理にランダム変動はさせない）
   });
+  // 【一時的な調査用】実際に受け取ったデータの中身を画面上に直接表示する（開発者ツール不要・原因判明後に削除予定）
+  const __dbgLines=Object.entries(quoteMap).map(([tk,q])=>
+    tk+': price='+q.price+' / series='+(Array.isArray(q.series)?q.series.length+'件':'無し'));
+  alert('【更新デバッグ】\n'+__dbgLines.join('\n'));
   const usd=await fetchPriceByTicker('USD');
   const eur=await fetchPriceByTicker('EUR');
   if(usd!=null)G.usdJpy=usd;
